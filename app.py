@@ -3,6 +3,8 @@ import requests
 import networkx as nx
 import plotly.graph_objects as go
 import pandas as pd
+import plotly.express as px
+from datetime import datetime
 
 # 스타일 적용
 st.markdown(
@@ -47,16 +49,12 @@ st.markdown(
         padding: 20px; 
         border-radius: 10px;
     }
-    .input-section {
-        display: flex;
-        justify-content: space-between;
-        margin-bottom: 20px;
-    }
-    .input-left, .input-right {
-        width: 48%;
-    }
-    .input-full {
-        width: 100%;
+    .stat-box {
+        background-color: #f0f0f0;
+        color: #333333;
+        padding: 15px;
+        border-radius: 10px;
+        margin-top: 10px;
     }
     </style>
     """,
@@ -159,58 +157,101 @@ def display_wallet_overview(overview):
     """
     st.markdown(overview_html, unsafe_allow_html=True)
 
+# 트랜잭션 세부 정보 표시
+def display_transaction_details(transactions):
+    st.subheader("트랜잭션 세부 정보")
+    for tx in transactions['txs']:
+        with st.expander(f"트랜잭션 {tx['hash']}"):
+            st.write(f"날짜: {pd.to_datetime(tx['time'], unit='s')}")
+            st.write(f"결과: {'받은 금액' if tx['result'] > 0 else '보낸 금액'}: {abs(tx['result'])} 사토시")
+            st.write(f"수수료: {tx['fee']} 사토시")
+            st.write("입력 주소:")
+            for inp in tx['inputs']:
+                st.write(f"- {inp['prev_out']['addr'] if 'addr' in inp['prev_out'] else '알 수 없음'}")
+            st.write("출력 주소:")
+            for out in tx['out']:
+                st.write(f"- {out['addr'] if 'addr' in out else '알 수 없음'}")
+
+# 추가 통계 정보 제공
+def get_additional_stats(transactions):
+    total_fees = sum(tx['fee'] for tx in transactions['txs'] if 'fee' in tx)
+    avg_fee = total_fees / len(transactions['txs'])
+    avg_sent = sum(-tx['result'] for tx in transactions['txs'] if tx['result'] < 0) / len(transactions['txs'])
+    avg_received = sum(tx['result'] for tx in transactions['txs'] if tx['result'] > 0) / len(transactions['txs'])
+
+    return {
+        'avg_fee': avg_fee,
+        'avg_sent': avg_sent,
+        'avg_received': avg_received
+    }
+
+# 추가 통계 정보 및 그래프 표시
+def display_additional_stats_and_graph(stats):
+    st.markdown(
+        """
+        <div class='stat-box'>
+            <h2>추가 통계 정보</h2>
+            <p><strong>평균 수수료:</strong> {avg_fee:.2f} 사토시</p>
+            <p><strong>평균 보낸 금액:</strong> {avg_sent:.2f} 사토시</p>
+            <p><strong>평균 받은 금액:</strong> {avg_received:.2f} 사토시</p>
+        </div>
+        """.format(
+            avg_fee=stats['avg_fee'],
+            avg_sent=stats['avg_sent'],
+            avg_received=stats['avg_received']
+        ), 
+        unsafe_allow_html=True
+    )
+
+    # 평균 보낸 금액과 받은 금액 시각화
+    data = {
+        '금액 종류': ['평균 보낸 금액', '평균 받은 금액'],
+        '사토시': [stats['avg_sent'], stats['avg_received']]
+    }
+    df = pd.DataFrame(data)
+    fig = px.bar(df, x='금액 종류', y='사토시', title="평균 보낸 금액 vs 평균 받은 금액", text='사토시')
+    st.plotly_chart(fig)
+
 def main():
     st.markdown("<div style='text-align: center; font-size: 24px; color: #333333;'><b>BLOCK-DARK</b></div>", unsafe_allow_html=True)
 
-    st.header("조사 설정")
+    # 사이드바로 UI 구성
+    st.sidebar.header("조사 설정")
 
-    # 조사 설정 UI 중앙 배치
-    st.markdown('<div class="input-section">', unsafe_allow_html=True)
+    address = st.sidebar.text_input("비트코인 주소 입력:")
+    trace_depth = st.sidebar.slider("자동 추적 깊이", 1, 5, 2)
     
-    st.markdown('<div class="input-left">', unsafe_allow_html=True)
-    address = st.text_input("비트코인 주소 입력:")
-    st.markdown('</div>', unsafe_allow_html=True)
+    start_date = st.sidebar.date_input("시작 날짜")
+    end_date = st.sidebar.date_input("종료 날짜")
     
-    st.markdown('<div class="input-right">', unsafe_allow_html=True)
-    trace_depth = st.slider("자동 추적 깊이", 1, 5, 2)
-    st.markdown('</div>', unsafe_allow_html=True)
+    min_amount = st.sidebar.number_input("최소 트랜잭션 금액 (사토시):", min_value=0, value=0)
+    filter_type = st.sidebar.selectbox("트랜잭션 필터:", ['전체', '보낸 트랜잭션', '받은 트랜잭션'])
 
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="input-section">', unsafe_allow_html=True)
-    st.markdown('<div class="input-left">', unsafe_allow_html=True)
-    start_date = st.date_input("시작 날짜")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="input-right">', unsafe_allow_html=True)
-    end_date = st.date_input("종료 날짜")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="input-section">', unsafe_allow_html=True)
-    st.markdown('<div class="input-left">', unsafe_allow_html=True)
-    min_amount = st.number_input("최소 트랜잭션 금액 (사토시):", min_value=0, value=0)
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="input-right">', unsafe_allow_html=True)
-    filter_type = st.selectbox("트랜잭션 필터:", ['전체', '보낸 트랜잭션', '받은 트랜잭션'])
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('</div>', unsafe_allow_html=True)
+    # 테스트 모드 확인
+    if address == "test":
+        address = "1PuJjnF476W3zXfVYmJfGnouzFDAXakkL4"
+        start_date = datetime(2023, 1, 1)
+        end_date = datetime(2024, 10, 23)
 
     time_range = (pd.Timestamp(start_date), pd.Timestamp(end_date))
 
-    if st.button("조사 시작"):
+    if st.sidebar.button("조사 시작"):
         if address:
             transactions = get_transaction_history(address)
             if transactions:
                 overview = get_wallet_overview(transactions)
                 display_wallet_overview(overview)
-                
+
+                # 추가 통계 정보 계산 및 표시
+                stats = get_additional_stats(transactions)
+                display_additional_stats_and_graph(stats)
+
                 st.header("트랜잭션 그래프")
                 fig = visualize_address_connections(address, transactions, filter_type, min_amount, time_range)
                 st.plotly_chart(fig)
+
+                # 트랜잭션 세부 정보 표시
+                display_transaction_details(transactions)
 
 if __name__ == "__main__":
     main()
